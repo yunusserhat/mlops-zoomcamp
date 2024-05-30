@@ -2,12 +2,14 @@ import os
 import pickle
 import click
 import mlflow
+import mlflow.sklearn
 import numpy as np
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from hyperopt.pyll import scope
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 
+# Set the tracking URI and experiment
 mlflow.set_tracking_uri("http://127.0.0.1:5000")
 mlflow.set_experiment("random-forest-hyperopt")
 
@@ -29,18 +31,21 @@ def load_pickle(filename: str):
     help="The number of parameter evaluations for the optimizer to explore"
 )
 def run_optimization(data_path: str, num_trials: int):
-
     X_train, y_train = load_pickle(os.path.join(data_path, "train.pkl"))
     X_val, y_val = load_pickle(os.path.join(data_path, "val.pkl"))
 
     def objective(params):
+        with mlflow.start_run(nested=True):
+            rf = RandomForestRegressor(**params)
+            rf.fit(X_train, y_train)
+            y_pred = rf.predict(X_val)
+            rmse = mean_squared_error(y_val, y_pred, squared=False)
 
-        rf = RandomForestRegressor(**params)
-        rf.fit(X_train, y_train)
-        y_pred = rf.predict(X_val)
-        rmse = mean_squared_error(y_val, y_pred, squared=False)
+            # Log the parameters and RMSE
+            mlflow.log_params(params)
+            mlflow.log_metric("rmse", rmse)
 
-        return {'loss': rmse, 'status': STATUS_OK}
+            return {'loss': rmse, 'status': STATUS_OK}
 
     search_space = {
         'max_depth': scope.int(hp.quniform('max_depth', 1, 20, 1)),
